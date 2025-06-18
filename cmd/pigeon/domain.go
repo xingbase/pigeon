@@ -11,8 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/xingbase/pigeon"
 	pcsv "github.com/xingbase/pigeon/csv"
+	pmail "github.com/xingbase/pigeon/mail"
 )
 
 func init() {
@@ -46,8 +46,9 @@ func (s *DomainCommand) Execute(args []string) error {
 	defer file.Close()
 
 	reader := csv.NewReader(bufio.NewReader(file))
+	reader.Comma = '\t'
 	domainCh := make(chan string, 100)
-	workerCount := 50 // Adjust based on system and DNS server capacity
+	workerCount := 10 // Adjust based on system and DNS server capacity
 
 	// Read CSV and send domains to channel
 	var totalCount int64
@@ -101,11 +102,11 @@ func processDomains(domains <-chan string, workerCount int, totalCount int64) (i
 	resultCh := make(chan DomainResult, workerCount)
 
 	// Initialize CSV files with headers
-	if err := pcsv.Write("valid_domains.csv", []string{"Domain"}, true); err != nil {
-		log.Fatalf("Error initializing valid_domains.csv: %v", err)
+	if err := pcsv.Write("domains_valid.csv", []string{"Domain"}, true); err != nil {
+		log.Fatalf("Error initializing domains_valid.csv: %v", err)
 	}
-	if err := pcsv.Write("invalid_domains.csv", []string{"Domain", "Error"}, true); err != nil {
-		log.Fatalf("Error initializing invalid_domains.csv: %v", err)
+	if err := pcsv.Write("domains_invalid.csv", []string{"Domain", "Error"}, true); err != nil {
+		log.Fatalf("Error initializing domains_invalid.csv: %v", err)
 	}
 
 	// Start worker pool
@@ -114,7 +115,7 @@ func processDomains(domains <-chan string, workerCount int, totalCount int64) (i
 		go func() {
 			defer wg.Done()
 			for domain := range domains {
-				valid, err := pigeon.IsValidDomain(domain)
+				valid, err := pmail.IsValidDomain(domain)
 				result := DomainResult{
 					Domain: domain,
 					Valid:  valid,
@@ -132,13 +133,13 @@ func processDomains(domains <-chan string, workerCount int, totalCount int64) (i
 		for result := range resultCh {
 			mu.Lock()
 			if result.Valid {
-				if err := pcsv.Write("valid_domains.csv", []string{result.Domain}, false); err != nil {
-					log.Printf("Error writing to valid_domains.csv: %v", err)
+				if err := pcsv.Write("domains_valid.csv", []string{result.Domain}, false); err != nil {
+					log.Printf("Error writing to domains_valid.csv: %v", err)
 				}
 				atomic.AddInt64(&validCount, 1)
 			} else {
-				if err := pcsv.Write("invalid_domains.csv", []string{result.Domain, result.Error}, false); err != nil {
-					log.Printf("Error writing to invalid_domains.csv: %v", err)
+				if err := pcsv.Write("domains_invalid.csv", []string{result.Domain, result.Error}, false); err != nil {
+					log.Printf("Error writing to domains_invalid.csv: %v", err)
 				}
 				atomic.AddInt64(&invalidCount, 1)
 			}
